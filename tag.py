@@ -435,24 +435,17 @@ def get_lemma(word,indice, tags,LIST):
     global SECOND_PERSON_TAG
 
     if GEN_TAG in tags:
-        if word.endswith("'s") or word.endswith("'S"):
-            word=word[:-2]
-            if len(tags)==3:
-                ss=set(tags)
-                if SUBST_TAG in ss and PROP_TAG in ss:
+        word = re.sub(r"('?s?)$", "", word, flags=re.IGNORECASE)
+        if len(tags) == 3:
+            ss = set(tags)
+
+            if SUBST_TAG in ss and PROP_TAG in ss:
                     return word
-            lem=get_lemma_after_check(word,indice,tags,LIST)
-            if lem==None:
-                return word
-        elif word.endswith("s") or word.endswith("S") or word.endswith("'"):
-            word=word[:-1]
-            if len(tags)==3:
-                ss=set(tags)
-                if SUBST_TAG in ss and PROP_TAG in ss:
-                    return word
-            lem=get_lemma_after_check(word,indice,tags,LIST)
-            if lem==None:
-                return word
+
+            lem = get_lemma_after_check(word, indice, tags, LIST)
+
+        if lem == None:
+            return word
 
     # Check if høflig
     if word=="De":
