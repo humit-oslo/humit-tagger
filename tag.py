@@ -578,7 +578,7 @@ def tag_text(text , write_output_to,  given_lang="au", output_tsv=False, write_i
 #        return s.replace(",","").replace(".","").isnumeric()
 #    return False
 
-def tag(text , write_output_to,  given_lang="au", output_tsv=False, write_identified_lang_to=None, return_as_object=False):
+def tag(text , write_output_to,  given_lang="au", output_tsv=False, write_identified_lang_to=None, return_as_object=False, sentences_splitted=False):
     global SEGMENTATION_TOKENIZER
     global SEGMENTATION_DEVICE
     global SEGMENTATION_MODEL
@@ -611,158 +611,179 @@ def tag(text , write_output_to,  given_lang="au", output_tsv=False, write_identi
     global UKJENT_TAG
 
     global INT_TOKENIZATION_DEVICE
-#    global general_counter_all
-
-    all_tags_object=[]
-
-    # Just to empty anything allocated on GPU.
-    torch.cuda.empty_cache()
-
-    # Here we get the whole text tokenized.
-    text=text.replace("\n", " ")
-    encodings = SEGMENTATION_TOKENIZER(text,add_special_tokens=False, return_tensors="pt").to(SEGMENTATION_MODEL.device)
-
-    # Save a copy of the tokenization
-    original_encodings=copy.deepcopy(encodings)
-    original_encodings=original_encodings.to("cpu")
-    torch.cuda.empty_cache()
-
-    # Pad to the complete size (model max_size -1 (-1 to add CLS))
-    old_size=encodings["input_ids"][0].size()[0]
-
-    # Pad size
-    pad_size=MAX_LENGTH_WITHOUT_CLS - old_size%MAX_LENGTH_WITHOUT_CLS
-
-    # Number of rows
-    row_count=int(old_size/MAX_LENGTH_WITHOUT_CLS) + 1
-
-    # Do padding with Zeros to the pad_size that we have calculated.
-    encodings["input_ids"] = torch.nn.functional.pad(input=encodings["input_ids"], pad=(0, pad_size), mode="constant", value=0)
-
-    # Set the last token as SENTENCE END (SEP)
-    encodings["input_ids"][0][old_size]=MODEL_SENTENCE_END_ID
-
-    # Chunk into max_length items
-    encodings["input_ids"]=torch.reshape(encodings["input_ids"],(row_count,MAX_LENGTH_WITHOUT_CLS))
-
-    # Add CLS to each item
-    encodings["input_ids"]=torch.cat(( torch.full((row_count,1),MODEL_SENTENCE_START_ID, device=SEGMENTATION_MODEL.device) ,encodings["input_ids"]),dim=1)
-
-    # Create attention mask
-    encodings["attention_mask"]=torch.ones_like(encodings["input_ids"], device=SEGMENTATION_MODEL.device)
-
-    # Create batches
-    input_ids_batched=torch.split(encodings["input_ids"], LANGUAGE_IDENTIFICATIOR_BATCH_SIZE)
-    attention_mask_batched=torch.split(encodings["attention_mask"], LANGUAGE_IDENTIFICATIOR_BATCH_SIZE)
-
-    encodings=encodings.to("cpu")
-    torch.cuda.empty_cache()
-
-    # Set the last chunk's attention mask according to its size
-    attention_mask_batched[-1][-1][pad_size +1:] = 0
-
-    # Now pass all chunks through the model and get the labels
-    # While passing, we count the number of bokmal and nynorsk markers
-    labels_output=[]
-    labels_ids=[0,0,0]
-
-    # First get them back to CPU to open space on GPU
-    input_ids_batched=[i.to("cpu") for i in input_ids_batched]
-    attention_mask_batched=[i.to("cpu") for i in attention_mask_batched]
-    torch.cuda.empty_cache()
-
-    for input_ids, attention_masks in zip(input_ids_batched, attention_mask_batched):
-#torch.tensor(b_input_ids).to(device).long()
-        current_batch={"input_ids":input_ids.to(SEGMENTATION_MODEL.device).long(), "attention_mask":attention_masks.to(SEGMENTATION_MODEL.device).long()}
-        outputs = SEGMENTATION_MODEL(**current_batch)
-        del current_batch
-        torch.cuda.empty_cache()
-
-        label_data=outputs.logits.argmax(-1)
-
-        label_counts_in_this_chunk=label_data.unique(return_counts=True)
-        for l_id, num in zip(label_counts_in_this_chunk[0].tolist(), label_counts_in_this_chunk[1].tolist()):
-            if l_id!=0:
-                labels_ids[l_id]+=num
-        labels_output.extend(label_data)
 
 
-    # Determine the languge. If the language is given as parameter use that.
-    # If not, use labels_ids to determine the language
-    if given_lang=="au" or given_lang==None:
-        if labels_ids[1]>labels_ids[2]:
-            if write_identified_lang_to!=None:
-                write_identified_lang_to.write("nn")
-            CLASS_TO_LABEL=CLASS_TO_LABEL_NN
-            FULLFORM_LIST=NN_FULLFORM_LIST
-            MAIN_TAG_LIST=MAIN_TAG_LIST_NN
-        else:
+    if sentences_splitted:
+        text=[j for j in [i.strip() for i in text] if j!=""]
+        encodings = SEGMENTATION_TOKENIZER(text,add_special_tokens=True, padding=False, truncation=True)#.to(SEGMENTATION_MODEL.device)
+        sentence_list = encodings["input_ids"]
+
+        # Determine the languge. If the language is given as parameter use that.
+        if given_lang=="bm" or given_lang=="au":
             if write_identified_lang_to!=None:
                 write_identified_lang_to.write("bm")
             CLASS_TO_LABEL=CLASS_TO_LABEL_BM
             FULLFORM_LIST=BM_FULLFORM_LIST
             MAIN_TAG_LIST=MAIN_TAG_LIST_BM
-    elif given_lang=="bm":
-        if write_identified_lang_to!=None:
-            write_identified_lang_to.write("bm")
-        CLASS_TO_LABEL=CLASS_TO_LABEL_BM
-        FULLFORM_LIST=BM_FULLFORM_LIST
-        MAIN_TAG_LIST=MAIN_TAG_LIST_BM
+        else:
+            if write_identified_lang_to!=None:
+                write_identified_lang_to.write("nn")
+            CLASS_TO_LABEL=CLASS_TO_LABEL_NN
+            FULLFORM_LIST=NN_FULLFORM_LIST
+            MAIN_TAG_LIST=MAIN_TAG_LIST_NN
     else:
-        if write_identified_lang_to!=None:
-            write_identified_lang_to.write("nn")
-        CLASS_TO_LABEL=CLASS_TO_LABEL_NN
-        FULLFORM_LIST=NN_FULLFORM_LIST
-        MAIN_TAG_LIST=MAIN_TAG_LIST_NN
+#    global general_counter_all
+
+        all_tags_object=[]
+
+        # Just to empty anything allocated on GPU.
+        torch.cuda.empty_cache()
+
+        # Here we get the whole text tokenized.
+        text=text.replace("\n", " ")
+        encodings = SEGMENTATION_TOKENIZER(text,add_special_tokens=False, return_tensors="pt").to(SEGMENTATION_MODEL.device)
+
+        # Save a copy of the tokenization
+        original_encodings=copy.deepcopy(encodings)
+        original_encodings=original_encodings.to("cpu")
+        torch.cuda.empty_cache()
+
+        # Pad to the complete size (model max_size -1 (-1 to add CLS))
+        old_size=encodings["input_ids"][0].size()[0]
+
+        # Pad size
+        pad_size=MAX_LENGTH_WITHOUT_CLS - old_size%MAX_LENGTH_WITHOUT_CLS
+
+        # Number of rows
+        row_count=int(old_size/MAX_LENGTH_WITHOUT_CLS) + 1
+
+        # Do padding with Zeros to the pad_size that we have calculated.
+        encodings["input_ids"] = torch.nn.functional.pad(input=encodings["input_ids"], pad=(0, pad_size), mode="constant", value=0)
+
+        # Set the last token as SENTENCE END (SEP)
+        encodings["input_ids"][0][old_size]=MODEL_SENTENCE_END_ID
+
+        # Chunk into max_length items
+        encodings["input_ids"]=torch.reshape(encodings["input_ids"],(row_count,MAX_LENGTH_WITHOUT_CLS))
+
+        # Add CLS to each item
+        encodings["input_ids"]=torch.cat(( torch.full((row_count,1),MODEL_SENTENCE_START_ID, device=SEGMENTATION_MODEL.device) ,encodings["input_ids"]),dim=1)
+
+        # Create attention mask
+        encodings["attention_mask"]=torch.ones_like(encodings["input_ids"], device=SEGMENTATION_MODEL.device)
+
+        # Create batches
+        input_ids_batched=torch.split(encodings["input_ids"], LANGUAGE_IDENTIFICATIOR_BATCH_SIZE)
+        attention_mask_batched=torch.split(encodings["attention_mask"], LANGUAGE_IDENTIFICATIOR_BATCH_SIZE)
+
+        encodings=encodings.to("cpu")
+        torch.cuda.empty_cache()
+
+        # Set the last chunk's attention mask according to its size
+        attention_mask_batched[-1][-1][pad_size +1:] = 0
+
+        # Now pass all chunks through the model and get the labels
+        # While passing, we count the number of bokmal and nynorsk markers
+        labels_output=[]
+        labels_ids=[0,0,0]
+
+        # First get them back to CPU to open space on GPU
+        input_ids_batched=[i.to("cpu") for i in input_ids_batched]
+        attention_mask_batched=[i.to("cpu") for i in attention_mask_batched]
+        torch.cuda.empty_cache()
+
+        for input_ids, attention_masks in zip(input_ids_batched, attention_mask_batched):
+#torch.tensor(b_input_ids).to(device).long()
+            current_batch={"input_ids":input_ids.to(SEGMENTATION_MODEL.device).long(), "attention_mask":attention_masks.to(SEGMENTATION_MODEL.device).long()}
+            outputs = SEGMENTATION_MODEL(**current_batch)
+            del current_batch
+            torch.cuda.empty_cache()
+
+            label_data=outputs.logits.argmax(-1)
+
+            label_counts_in_this_chunk=label_data.unique(return_counts=True)
+            for l_id, num in zip(label_counts_in_this_chunk[0].tolist(), label_counts_in_this_chunk[1].tolist()):
+                if l_id!=0:
+                    labels_ids[l_id]+=num
+            labels_output.extend(label_data)
 
 
-    # Serialize back
-    labels_output=torch.stack(labels_output ,dim=0)
-    torch.cuda.empty_cache()
-    labels_output=labels_output[:, range(1,MAX_LENGTH_WITHOUT_CLS+1)]
-    torch.cuda.empty_cache()
-    labels_output=torch.reshape(labels_output,(1,row_count *MAX_LENGTH_WITHOUT_CLS))
-    torch.cuda.empty_cache()
-
-    # Now the data is split into sentences
-    # So, now create sentence data as list so that this could be used
-    # in torch operations and can be input to the models
-    sentence_list=[]
-    this_sentence=[MODEL_SENTENCE_START_ID]
-    last_label=-1
-    for token, label in zip(original_encodings["input_ids"][0].tolist(), labels_output[0].tolist()):
-        if TOKENS_STARTING_WITH_HASH[token]:
-            if last_label!=0:
-                if len(sentence_list)>0:
-                    sentence_list[-1].append(token)
-                else:
-                    sentence_list=[[token]]
-#                    sentence_list.append([token])
+        # Determine the languge. If the language is given as parameter use that.
+        # If not, use labels_ids to determine the language
+        if given_lang=="au" or given_lang==None:
+            if labels_ids[1]>labels_ids[2]:
+                if write_identified_lang_to!=None:
+                    write_identified_lang_to.write("nn")
+                CLASS_TO_LABEL=CLASS_TO_LABEL_NN
+                FULLFORM_LIST=NN_FULLFORM_LIST
+                MAIN_TAG_LIST=MAIN_TAG_LIST_NN
             else:
+                if write_identified_lang_to!=None:
+                    write_identified_lang_to.write("bm")
+                CLASS_TO_LABEL=CLASS_TO_LABEL_BM
+                FULLFORM_LIST=BM_FULLFORM_LIST
+                MAIN_TAG_LIST=MAIN_TAG_LIST_BM
+        elif given_lang=="bm":
+            if write_identified_lang_to!=None:
+                write_identified_lang_to.write("bm")
+            CLASS_TO_LABEL=CLASS_TO_LABEL_BM
+            FULLFORM_LIST=BM_FULLFORM_LIST
+            MAIN_TAG_LIST=MAIN_TAG_LIST_BM
+        else:
+            if write_identified_lang_to!=None:
+                write_identified_lang_to.write("nn")
+            CLASS_TO_LABEL=CLASS_TO_LABEL_NN
+            FULLFORM_LIST=NN_FULLFORM_LIST
+            MAIN_TAG_LIST=MAIN_TAG_LIST_NN
+
+
+        # Serialize back
+        labels_output=torch.stack(labels_output ,dim=0)
+        torch.cuda.empty_cache()
+        labels_output=labels_output[:, range(1,MAX_LENGTH_WITHOUT_CLS+1)]
+        torch.cuda.empty_cache()
+        labels_output=torch.reshape(labels_output,(1,row_count *MAX_LENGTH_WITHOUT_CLS))
+        torch.cuda.empty_cache()
+
+        # Now the data is split into sentences
+        # So, now create sentence data as list so that this could be used
+        # in torch operations and can be input to the models
+        sentence_list=[]
+        this_sentence=[MODEL_SENTENCE_START_ID]
+        last_label=-1
+        for token, label in zip(original_encodings["input_ids"][0].tolist(), labels_output[0].tolist()):
+            if TOKENS_STARTING_WITH_HASH[token]:
+                if last_label!=0:
+                    if len(sentence_list)>0:
+                        sentence_list[-1].append(token)
+                    else:
+                        sentence_list=[[token]]
+#                        sentence_list.append([token])
+                else:
+                    this_sentence.append(token)
+                    last_label=label
+            elif label==0:
                 this_sentence.append(token)
                 last_label=label
-        elif label==0:
-            this_sentence.append(token)
-            last_label=label
-        else:
-            this_sentence.append(token)
+            else:
+                this_sentence.append(token)
+                sentence_list.append(this_sentence)
+                this_sentence=[MODEL_SENTENCE_START_ID]
+                last_label=label
+
+        if len(this_sentence)>1:
             sentence_list.append(this_sentence)
-            this_sentence=[MODEL_SENTENCE_START_ID]
-            last_label=label
 
-    if len(this_sentence)>1:
-        sentence_list.append(this_sentence)
-
-    # Remove any tensors from the GPU since we have sentences in the memory now
-    del original_encodings
-    del labels_output
-    del attention_mask_batched
-    del input_ids_batched
-    del encodings
-    del old_size
-    del text
-    del outputs
-    torch.cuda.empty_cache()
+        # Remove any tensors from the GPU since we have sentences in the memory now
+        del original_encodings
+        del labels_output
+        del attention_mask_batched
+        del input_ids_batched
+        del encodings
+        del old_size
+        del text
+        del outputs
+        torch.cuda.empty_cache()
 
     # Create batches
     batched_sentences=[]
@@ -921,6 +942,11 @@ def main():
                         "identification. This must be less than the normal batch "
                         "size since the whole input space of the model is utilized.")
 
+    parser.add_argument("-s", "--separated-sentences", action="store_const",
+                        const="yes", default="no",
+                        help="Skip sentence segmentation and language identification. "
+                        "Consider each line as a sentence. The default language is --bm (bokmål)."
+                        "So, if nynorsk is the language of the sentences, then --nn must be used.")
 
     args = parser.parse_args()
 
@@ -939,9 +965,16 @@ def main():
     if args.filename:
         if os.path.isfile(args.filename):
             load_models_and_config()
-            strs=split_titles(open(args.filename,"r").read().strip().replace("\r",""))
-            for s in strs:
-                tag(s, sys.stdout, args.spraak, args.output_tsv)
+            if args.separated_sentences == "yes":
+                strs=open(args.filename,"r").read().strip().replace("\r","").split("\n")
+                spraak=args.spraak
+                if spraak=="au":
+                    spraak="bm"
+                tag(strs, sys.stdout, spraak, args.output_tsv, None, False, True)
+            else:
+                strs=split_titles(open(args.filename,"r").read().strip().replace("\r",""))
+                for s in strs:
+                    tag(s, sys.stdout, args.spraak, args.output_tsv)
         else:
             print("The file " + args.filename + " could not be found.")
             exit(1)
@@ -965,9 +998,16 @@ def main():
 
                     with open(f_name, "r") as infile:
                         with open(output_f_name, "w") as outfile:
-                            strs=split_titles(infile.read().strip().replace("\r",""))
-                            for s in strs:
-                                tag(s, outfile, args.spraak, args.output_tsv)
+                            if args.separated_sentences == "yes":
+                                strs=infile.read().strip().replace("\r","").split("\n")
+                                spraak=args.spraak
+                                if spraak=="au":
+                                    spraak="bm"
+                                tag(strs, outfile, spraak, args.output_tsv, None, False, True)
+                            else:
+                                strs=split_titles(infile.read().strip().replace("\r",""))
+                                for s in strs:
+                                    tag(s, outfile, args.spraak, args.output_tsv)
 
     else:
         parser.print_help()
