@@ -617,7 +617,6 @@ def tag(text , write_output_to,  given_lang="au", output_tsv=False, write_identi
         text=[j for j in [i.strip() for i in text] if j!=""]
         encodings = SEGMENTATION_TOKENIZER(text,add_special_tokens=True, padding=False, truncation=True)#.to(SEGMENTATION_MODEL.device)
         sentence_list = encodings["input_ids"]
-
         # Determine the languge. If the language is given as parameter use that.
         if given_lang=="bm" or given_lang=="au":
             if write_identified_lang_to!=None:
@@ -788,14 +787,13 @@ def tag(text , write_output_to,  given_lang="au", output_tsv=False, write_identi
     # Create batches
     batched_sentences=[]
     my_batch=[]
-    num_sentences=0
     for sentence in sentence_list:
         sentence.append(MODEL_SENTENCE_END_ID)
-        if num_sentences==BATCH_SIZE:
+        my_batch.append(sentence)
+        if len(my_batch)==BATCH_SIZE:
             max_len=len(max(my_batch, key=len))
             if max_len>SEGMENTATION_TOKENIZER.model_max_length:
                 max_len=SEGMENTATION_TOKENIZER.model_max_length
-
             my_attentions=torch.LongTensor([[1] * len(i[0:max_len]) + [0]*(max_len-len(i[0:max_len])) for i in my_batch]).to("cpu")
             my_batch=[i[0:max_len] + [0]*(max_len-len(i[0:max_len])) for i in my_batch]
             to_append={
@@ -803,12 +801,7 @@ def tag(text , write_output_to,  given_lang="au", output_tsv=False, write_identi
                                     "attention_mask": my_attentions,
                                     }
             batched_sentences.append(to_append)
-            num_sentences =0
             my_batch=[]
-        else:
-            my_batch.append(sentence)
-            num_sentences+=1
-
     if len(my_batch)>0:
         max_len=len(max(my_batch, key=len))
         if max_len>SEGMENTATION_TOKENIZER.model_max_length:
