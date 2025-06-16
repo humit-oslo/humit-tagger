@@ -16,8 +16,8 @@ BATCH_SIZE=8
 LANGUAGE_IDENTIFICATIOR_BATCH_SIZE=1
 MAX_LENGTH=512
 TOKENIZER="ltg/norbert3-large"
-SEGMENTATION_DEVICE="cuda:0"
-CLASSIFICATION_DEVICE="cuda:0"
+SEGMENTATION_DEVICE="cuda:0" if torch.cuda.is_available() else "cpu"
+CLASSIFICATION_DEVICE="cuda:0" if torch.cuda.is_available() else "cpu"
 SEGMENTATION_MODEL=None
 CLASSIFICATION_MODEL=None
 SCRIPT_PATH=os.path.abspath(os.path.dirname(__file__))
@@ -588,7 +588,10 @@ def tag(text , write_output_to,  given_lang="au", output_tsv=False, write_identi
                 if TOKEN_MERGES[token]:
                     tag.append({"w":TOKENIZER.decode(token)[1:], "t":token_class})
                 else:
-                    tag[-1]["w"] += TOKENIZER.decode(token)
+                    if len(tag)>0:
+                        tag[-1]["w"] += TOKENIZER.decode(token)
+                    else:
+                        tag.append({"w": TOKENIZER.decode(token), "t": token_class})
 
             # Check if the words come after punctuations. Assign True for their places. False otherwise
             check_for_first_word=[True]+[True if "t" in tagging and len(set(tagging["t"]).intersection(PUNCTUATION))>0 else False for tagging in tag][:-1]
