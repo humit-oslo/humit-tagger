@@ -6,8 +6,9 @@ if sys.argv[1]=="nn":
 else:
     from fullform_bm import fullformHash
 
-NN_TAGS={"$punc$","1","2","3","<anf>","<komma>","<parentes-beg>","<parentes-slutt>","<strek>","adj","adv","det","inf-merke","interj","konj","prep","pron","sbu","subst","symb","ukjent","verb","<adj>","<adv>","<dato>","<ellipse>","<kolon>","<next_token>","<ordenstal>","<perf-part>","<pres-part>","<punkt>","<romartal>","<semi>","<spm>","<st-verb>","<utrop>","akk","appell","bu","dem","eint","fem","fl","fork","forst","gen","hum","høfleg","imp","inf","komp","kvant","m/f","mask","nom","nøyt","pass","perf-part","pers","pos","poss","pres","pret","prop","refl","res","sp","sup","symb","ub","ubøy","ufl"}
+NN_TAGS_OLD={"$punc$","1","2","3","<anf>","<komma>","<parentes-beg>","<parentes-slutt>","<strek>","adj","adv","det","inf-merke","interj","konj","prep","pron","sbu","subst","symb","ukjent","verb","<adj>","<adv>","<dato>","<ellipse>","<kolon>","<next_token>","<ordenstal>","<perf-part>","<pres-part>","<punkt>","<romartal>","<semi>","<spm>","<st-verb>","<utrop>","akk","appell","bu","dem","eint","fem","fl","fork","forst","gen","hum","høfleg","imp","inf","komp","kvant","m/f","mask","nom","nøyt","pass","perf-part","pers","pos","poss","pres","pret","prop","refl","res","sp","sup","symb","ub","ubøy","ufl"}
 
+NN_TAGS={"1", "2", "3", "<adj>", "<adv>", "<anf>", "<dato>", "<ellipse>", "<kolon>", "<komma>", "<ordenstal>", "<parentes-beg>", "<parentes-slutt>", "<perf-part>", "<pres-part>", "<punkt>", "<romartal>", "<semi>", "<spm>", "<st-verb>", "<strek>", "<utrop>", "adj", "adv", "akk", "appell", "bu", "dem", "det", "eint", "fem", "fl", "fork", "forst", "gen", "hum", "høfleg", "imp", "inf", "inf-merke", "interj", "komp", "konj", "kvant", "m/f", "mask", "nom", "nøyt", "pass", "perf-part", "pers", "pos", "poss", "prep", "pres", "pret", "pron", "prop", "refl", "res", "sbu", "sp", "subst", "sup", "symb", "ub", "ubøy", "ufl", "ukjent", "verb"}
 
 EQUAL_TAGS={":subst:":"subst",
             ":ukjent:": "ukjent",
@@ -43,6 +44,8 @@ NN_TAGS={i if i not in EQUAL_TAGS else EQUAL_TAGS[i] for i in NN_TAGS}
 BM_TAGS={i if i not in NN_TO_BM else NN_TO_BM[i] for i in NN_TAGS}
 
 MAIN_TAG_LIST_NN=['$punc$', '1', '2', '3', '<anf>', '<komma>', '<parentes-beg>', '<parentes-slutt>', '<strek>', 'adj', 'adv', 'det', 'inf-merke', 'interj', 'konj', 'prep', 'pron', 'sbu', 'subst', 'symb', 'ukjent', 'verb', '<adj>', '<adv>', '<dato>', '<ellipse>', '<kolon>', '<next_token>', '<ordenstal>', '<perf-part>', '<pres-part>', '<punkt>', '<romartal>', '<semi>', '<spm>', '<st-verb>', '<utrop>', 'akk', 'appell', 'bu', 'dem', 'eint', 'fem', 'fl', 'fork', 'forst', 'gen', 'hum', 'høfleg', 'imp', 'inf', 'komp', 'kvant', 'm/f', 'mask', 'nom', 'nøyt', 'pass', 'perf-part', 'pers', 'pos', 'poss', 'pres', 'pret', 'prop', 'refl', 'res', 'sp', 'sup', 'symb', 'ub', 'ubøy', 'ufl']
+
+MAIN_TAG_LIST_NN=["1", "2", "3", "<adj>", "<adv>", "<anf>", "<dato>", "<ellipse>", "<kolon>", "<komma>", "<ordenstal>", "<parentes-beg>", "<parentes-slutt>", "<perf-part>", "<pres-part>", "<punkt>", "<romartal>", "<semi>", "<spm>", "<st-verb>", "<strek>", "<utrop>", "adj", "adv", "akk", "appell", "bu", "dem", "det", "eint", "fem", "fl", "fork", "forst", "gen", "hum", "høfleg", "imp", "inf", "inf-merke", "interj", "komp", "konj", "kvant", "m/f", "mask", "nom", "nøyt", "pass", "perf-part", "pers", "pos", "poss", "prep", "pres", "pret", "pron", "prop", "refl", "res", "sbu", "sp", "subst", "sup", "symb", "ub", "ubøy", "ufl", "ukjent", "verb"]
 
 MAIN_TAG_LIST_BM=[NN_TO_BM[i] if i in NN_TO_BM else i for i in MAIN_TAG_LIST_NN]
 

@@ -36,7 +36,7 @@ def index():
         output_content = io.StringIO()
         lang_used = io.StringIO()
 
-        tag(text, output_content, lang, True, lang_used ) 
+        tag_text(text, output_content, lang, True, lang_used ) 
 
         all_tagged = output_content.getvalue()
         lang_tag = lang_used.getvalue()
