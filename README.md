@@ -31,6 +31,18 @@ Directory-moden kjøres ikke rekursivt. Filene i output\_directory blir overskre
 
 Skriptet vil returnere json.
 
+## Den nye versjonen
+
+Vi lager en ny versjon som bruker NorBertv3 som basismodell. 
+Denne versjonen krever ikke en separat ordsammenslåingsmodell fordi tokeniseringen gir informasjon om en token er sammen med den forrige tokenen eller ikke (inkludert tegnsetting).
+
+For å installere denne versjonen, etter å klone dette repoet:
+
+    ./setup.sh
+
+Da kan du bruke tag\_new.py som du bruker tag.py
+
+
 # License
 
 [MIT license](https://github.com/textlab/norwegian_ml_tagger/blob/master/LICENSE)
