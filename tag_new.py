@@ -504,46 +504,16 @@ def tag(text , write_output_to,  given_lang="au", output_tsv=False, write_identi
                 elif token==MODEL_SENTENCE_END_ID:
                     break
                 lemma_id=int(lemma_id)
-                if lemma_id == 0:
+                if lemma_id == 0: # If there is no lemma here, that means we haven't reached the end of the word
                     if len(tag)>0:
                         tag[-1]["w"] += TOKENIZER.decode(token)
                     else:
                         tag.append({"w": TOKENIZER.decode(token), "t": token_class, "l":lemma_id})
                 else:
                     tag.append({"w":TOKENIZER.decode(token).strip(), "t":token_class, "l":lemma_id})
-                continue
                     
-                #print(lemma_id)
-                #exit(0)
-                #if int(token_class_num.cpu()) in PUNCTUATION_CLASSES:
-                #    tag.append({"w":TOKENIZER.decode(token).strip(), "t":token_class})
-                #    continue
-                #if TOKEN_MERGES[token]:
-                #    tag.append({"w":TOKENIZER.decode(token)[1:], "t":token_class})
-                #else:
-                #    if len(tag)>0:
-                #        tag[-1]["w"] += TOKENIZER.decode(token)
-                #    else:
-                #        tag.append({"w": TOKENIZER.decode(token), "t": token_class})
             tag=[{"w":i["w"], "t":[MAIN_TAG_LIST[j] for j in i["t"]], "l":LemmaHandling.get_lemma_given_word_and_lemma_list_index(i["w"],i["l"])} for i in tag]
 
-#            print(tag)
-#            exit(0)
-            # Check if the words come after punctuations. Assign True for their places. False otherwise
-#            check_for_first_word=[True]+[True if "t" in tagging and len(set(tagging["t"]).intersection(PUNCTUATION))>0 else False for tagging in tag][:-1]
-
-            # Check if the words that come after punctuations begin with an alphanumeric. True if yes, False otherwise
-            # By other words, this marks the words that needs special handling
-#            check_for_first_word=[ True if item[0] and item[1]["w"].isalpha() else False for item in zip(check_for_first_word, tag)]
-
-            # Get the tags for the words. If it is a marked word, use get_lemma_for_the_first_word else use get_lemma
-#            tag=[dict(item[1], **dict({"l":get_lemma(item[1]["w"], 0 , item[1]["t"] if "t" in item[1] else [UKJENT_TAG_ID] ,FULLFORM_LIST)if not item[0] else get_lemma_for_the_first_word(item[1]["w"], item[1]["t"] if "t" in item[1] else [UKJENT_TAG_ID] ,FULLFORM_LIST)  }))   for item in zip(check_for_first_word,tag) ]
-
-            # Assign word as lemma if lemma is None.
-            # Assign tag as ukjent if tag is empty set.
-#            tag=[{"w":j["w"], "l": j["w"] if j["l"]==None else j["l"] , "t":[ MAIN_TAG_LIST[k] for k in j["t"]] if "t" in j else ["ukjent"] } for j in tag]
-#            general_counter_all+=len(tag)
-#            print(general_counter_all)
             if output_tsv:
                 for www in tag:
                     write_output_to.write(www["w"])
