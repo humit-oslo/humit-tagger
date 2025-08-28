@@ -8,6 +8,7 @@ import copy
 import pickle
 from functools import cmp_to_key
 from transformers import AutoModelForTokenClassification, AutoTokenizer
+from lemma_rule import LemmaHandling
 
 # This setting is overidden by the main function in processing the parameters.
 BATCH_SIZE=8
@@ -18,8 +19,10 @@ MAX_LENGTH=512
 TOKENIZER="ltg/norbert3-large"
 SEGMENTATION_DEVICE="cuda:0" if torch.cuda.is_available() else "cpu"
 CLASSIFICATION_DEVICE="cuda:0" if torch.cuda.is_available() else "cpu"
+LEMMATIZATION_DEVICE="cuda:0" if torch.cuda.is_available() else "cpu"
 SEGMENTATION_MODEL=None
 CLASSIFICATION_MODEL=None
+LEMMATIZATION_MODEL=None
 SCRIPT_PATH=os.path.abspath(os.path.dirname(__file__))
 MODELS_DIR=SCRIPT_PATH + "/models_new"
 LABEL_LIST_FILE = MODELS_DIR + "/label_list.txt"
@@ -27,8 +30,9 @@ LABEL_CLASSES_FILE = MODELS_DIR + "/labels_classifier.txt"
 LABEL_ORDER_FILE = MODELS_DIR + "/labels_order.json"
 SEGMENTATION_MODEL_DIR = MODELS_DIR + "/sentence_segmentation/"
 CLASSIFICATION_MODEL_DIR = MODELS_DIR + "/classification/"
-NN_FULLFORM_LIST_PATH = SCRIPT_PATH + "/nn_new.pickle"
-BM_FULLFORM_LIST_PATH = SCRIPT_PATH + "/bm_new.pickle"
+LEMMATIZATION_MODEL_DIR = MODELS_DIR + "/lemmatization/"
+LEMMA_RULES = None
+LEMMA_RULES_OBJ_FILE = SCRIPT_PATH + "/lemma_rules.pickle" 
 SUBST_TAG="subst"
 PROP_TAG="prop"
 GEN_TAG="gen"
@@ -63,149 +67,73 @@ EQUAL_TAGS = None
 ID2LABEL = None
 MODEL_SENTENCE_START_ID = None
 MODEL_SENTENCE_END_ID = None
-NN_FULLFORM_LIST=None
-BM_FULLFORM_LIST=None
 SUBST_TAG_ID=None
 PROP_TAG_ID=None
 GEN_TAG_ID=None
 UKJENT_TAG_ID=None
 SECOND_PERSON_TAG_ID=None
-NN_FULLFORM_LIST=None
-BM_FULLFORM_LIST=None
 
-# Recursive function to seek the lemma of the word
-# 1. Check if the word is 1 character. If yes return None (not found)
-# 2. Check if the word class matches. If exclude the first character and try again
-# 3. If the word and the type matches and if there is only one option (as tring) return that
-# 4. If There are multiple options score them, and pick the most scored one
-#            Scoring is done according to the number of matching tags
-# 5. Otherwise exclude the first character and try again
+first = ["»",")","(","?","\"","-","©","%"]
+second = [",",".","§",":","©","@"]
 
-# First this function is called to check gen tag. It removes 's ' and s at the end of the word then
-# runs the actual lemma function
-def get_lemma(word,indice, tags,LIST):
-    global GEN_TAG_ID
-    global SUBST_TAG_ID
-    global PROP_TAG_ID
-    global SECOND_PERSON_TAG_ID
+REPLACE_DICT = {}
+for i in first:
+    for j in second:
+        REPLACE_DICT[i+j] = i + " " + j
 
-    if GEN_TAG_ID in tags:
-        if word.endswith("'s") or word.endswith("'S"):
-            word=word[:-2]
-            if len(tags)==3:
-                ss=set(tags)
-                if SUBST_TAG_ID in ss and PROP_TAG_ID in ss:
-                    return word
-            lem=get_lemma_after_check(word,indice,tags,LIST)
-            if lem==None:
-                return word
-        elif word.endswith("s") or word.endswith("S") or word.endswith("'"):
-            word=word[:-1]
-            if len(tags)==3:
-                ss=set(tags)
-                if SUBST_TAG_ID in ss and PROP_TAG_ID in ss:
-                    return word
-            lem=get_lemma_after_check(word,indice,tags,LIST)
-            if lem==None:
-                return word
+# Manual replaces:
+REPLACE_DICT[".»"] = ". »"
+REPLACE_DICT["»?"] = "» ?"
+REPLACE_DICT[")?"] = ") ?"
+REPLACE_DICT["\"?"] = "\" ?"
+REPLACE_DICT[",\""] = ", \""
+REPLACE_DICT["??"] = "? ?"
+REPLACE_DICT[",»"] = ", »"
+REPLACE_DICT["?»"] = "? »"
+REPLACE_DICT["»)"] = "» )"
+REPLACE_DICT[".\""] = ". \""
+REPLACE_DICT["\"."] = "\" ."
+REPLACE_DICT["?\""] = "? \""
+REPLACE_DICT["\"?"] = "\" ?"
+REPLACE_DICT[".)"] = ". )"
+REPLACE_DICT[".,"] = ". ,"
+REPLACE_DICT[",."] = ", ."
+REPLACE_DICT["«..."] = "« ..."
+REPLACE_DICT["»..."] = "» ..."
+REPLACE_DICT[":."] = ": ."
+REPLACE_DICT[".:"] = ". :"
+REPLACE_DICT["?)"] = "? )"
+REPLACE_DICT[")?"] = ") ?"
+REPLACE_DICT[";)"] = "; )"
+REPLACE_DICT[");"] = ") ;"
+REPLACE_DICT["(!"] = "( !"
+REPLACE_DICT["!)"] = "! )"
+REPLACE_DICT["(\""] = "( \""
+REPLACE_DICT["\"("] = "\" ("
+REPLACE_DICT["\")"] = "\" )"
+REPLACE_DICT[")\""] = ") \""
+REPLACE_DICT["»;"] = "» ;"
+REPLACE_DICT["“"] = "\""
+REPLACE_DICT["”"] = "\""
+REPLACE_DICT["ï"] = "i"
+REPLACE_DICT["Ò"] = "O"
+REPLACE_DICT["Ú"] = "U"
+REPLACE_DICT["ú"] = "u"
+REPLACE_DICT["ò"] = "o"
+REPLACE_PATTERN = '|'.join(sorted(re.escape(k) for k in REPLACE_DICT))
 
-    # Check if høflig
-    if word=="De":
-        if SECOND_PERSON_TAG_ID in tags:
-            return "De"
-        else:
-            return "de"
-    return get_lemma_after_check(word,indice,tags,LIST)
+def preprocess_text(text):
+    global REPLACE_PATTERN
+    global REPLACE_DICT
+    new_text = re.sub(REPLACE_PATTERN, lambda m: REPLACE_DICT.get(m.group(0).upper()), text)
+    while new_text != text:
+        text = new_text
+        new_text = re.sub(REPLACE_PATTERN, lambda m: REPLACE_DICT.get(m.group(0).upper()), text)
+    return new_text
 
-def get_lemma_after_check(word, indice, tags, LIST):
-    global SUBST_TAG_ID
-    global PROP_TAG_ID
-
-    # Set hard limit for recursion. Handy when words are not recognized by the tokenizer
-    if indice>300:
-        return None
-
-    # If the word is only one character return None
-    if len(word[indice:])<=1:
-        return None
-
-    # If the word only has subst and prop as tags return the rest of the word as lemma for the rest
-    if len(tags)==2 and (tags[0]==SUBST_TAG_ID and tags[1]==PROP_TAG_ID or tags[0]==PROP_TAG_ID and tags[1]==SUBST_TAG_ID):
-        return word[indice:]
-
-    pot=LIST.get(str(word[indice:]))
-    if pot==None:
-        returned=get_lemma_after_check(word, indice+1, tags, LIST)
-        if returned==None:
-            return None
-        return word[indice:indice+1] + returned
-    else:
-        typ=pot.get(tags[0])
-        if typ==None:
-            if word[indice:indice+1].isupper():
-                word=word[:indice] + word[indice].lower() + word[indice+1:]
-                returned = get_lemma_after_check(word, indice, tags, LIST)
-                if returned==None:
-                    return None
-                return returned
-            else:
-                returned = get_lemma_after_check(word, indice+1, tags, LIST)
-                if returned==None:
-                    return None
-                return word[indice:indice+1] + returned
-        else:
-            if type(typ)==str:
-                return typ
-            elif type(typ)==dict:
-                scores={i:len(set(typ[i]).intersection(tags[1:])) for i in typ}
-                return max(scores, key=scores.get)
-            else :
-                returned = get_lemma_after_check(word, indice+1, tags, LIST)
-                if returned==None:
-                    return None
-                return word[indice:indice+1] + returned
-
-def get_lemma_for_the_first_word(word, tags, LIST):
-    global SUBST_TAG_ID
-    global PROP_TAG_ID
-    global GEN_TAG_ID
-    global SECOND_PERSON_TAG_ID
-
-    if len(word)==1:
-        if word=="I" or word=="i":
-           return "i"
-        if word=="Å" or word=="å":
-           return "å"
-
-    # If the word only has subst and prop as tags return the rest of the word as lemma for the rest
-    if len(tags)==2 and (tags[0]==SUBST_TAG_ID and tags[1]==PROP_TAG_ID or tags[0]==PROP_TAG_ID and tags[1]==SUBST_TAG_ID):
-        return word
-    elif len(tags)==3:
-        ss=set(tags)
-        if SUBST_TAG_ID in ss and PROP_TAG_ID in ss and GEN_TAG_ID in ss:
-            if word.endswith("'s") or word.endswith("'S"):
-                word=word[:-2]
-                return word
-            elif word.endswith("s") or word.endswith("S") or word.endswith("'"):
-                word=word[:-1]
-                return word
-
-    # Check if høflig
-    if word=="De":
-        if SECOND_PERSON_TAG_ID in tags:
-            return "De"
-        else:
-            return "de"
-
-    pot=LIST.get(word)
-    if pot==None:
-        if(word[0].isupper()):
-            new_word=str(word[0:1].lower()) + str(word[1:])
-            return get_lemma(new_word,0,tags,LIST)
-        return get_lemma(word,0,tags,LIST)
-    else:
-        return get_lemma(word,0,tags,LIST)
-
+# return the lemma given the word and lemma_indice
+def get_lemma(word,lemma_indice):
+    return word
 
 def compare_label(t1,t2):
     global LABEL_ORDER
@@ -225,8 +153,10 @@ def load_models_and_config():
     global TOKENIZER
     global SEGMENTATION_DEVICE
     global CLASSIFICATION_DEVICE
+    global LEMMATIZATION_DEVICE
     global SEGMENTATION_MODEL
     global CLASSIFICATION_MODEL
+    global LEMMATIZATION_MODEL
     global MAX_LENGTH
     global CLASS_TO_LABEL_BM
     global CLASS_TO_LABEL_NN
@@ -244,11 +174,6 @@ def load_models_and_config():
     global CLASSIFICATION_MODEL_DIR
     global MODEL_SENTENCE_START_ID
     global MODEL_SENTENCE_END_ID
-    global NN_FULLFORM_LIST
-    global BM_FULLFORM_LIST
-    global NN_FULLFORM_LIST_PATH
-    global BM_FULLFORM_LIST_PATH
-    global TOKEN_MERGES
     global PUNCTUATION
     global PUNCTUATION_TAG_LIST
     global PUNCTUATION_CLASSES
@@ -262,11 +187,10 @@ def load_models_and_config():
     global GEN_TAG
     global UKJENT_TAG
     global SECOND_PERSON_TAG
-    global NN_FULLFORM_LIST_PATH
-    global BM_FULLFORM_LIST_PATH
-    global NN_FULLFORM_LIST
-    global BM_FULLFORM_LIST
+    global LEMMA_RULES
+    global LEMMA_RULES_OBJ_FILE
 
+    LemmaHandling.load_lemma_rules(LEMMA_RULES_OBJ_FILE)
     
     with open(LABEL_ORDER_FILE, "r") as f:
         LABEL_ORDER = json.load(f)
@@ -315,18 +239,16 @@ def load_models_and_config():
     CLASSIFICATION_MODEL = AutoModelForTokenClassification.from_pretrained(CLASSIFICATION_MODEL_DIR, trust_remote_code=True)
     CLASSIFICATION_MODEL.to(CLASSIFICATION_DEVICE)
     CLASSIFICATION_MODEL.eval()
+    
+    LEMMATIZATION_MODEL = AutoModelForTokenClassification.from_pretrained(LEMMATIZATION_MODEL_DIR, trust_remote_code=True)
+    LEMMATIZATION_MODEL.to(LEMMATIZATION_DEVICE)
+    LEMMATIZATION_MODEL.eval()
 
     TOKENIZER = AutoTokenizer.from_pretrained(TOKENIZER, trust_remote_code=True)
     MODEL_SENTENCE_START_ID = int(TOKENIZER.convert_tokens_to_ids("[CLS]"))
     MODEL_SENTENCE_END_ID  = int(TOKENIZER.convert_tokens_to_ids("[SEP]"))
 
-    with open(NN_FULLFORM_LIST_PATH, "rb") as handle:
-        NN_FULLFORM_LIST = pickle.load(handle)
-
-    with open(BM_FULLFORM_LIST_PATH, "rb") as handle:
-        BM_FULLFORM_LIST = pickle.load(handle)
-    
-    TOKEN_MERGES = [TOKENIZER.decode(i).startswith(" ")  for i in range(len(TOKENIZER))]
+#    TOKEN_MERGES = [TOKENIZER.decode(i).startswith(" ") for i in range(len(TOKENIZER))]
     PUNCTUATION=set([i for i,j in enumerate(MAIN_TAG_LIST_NN) if j in PUNCTUATION_TAG_LIST])
     PUNCTUATION_CLASSES = []
     for i in CLASS_TO_LABEL_NN:
@@ -334,27 +256,20 @@ def load_models_and_config():
             PUNCTUATION_CLASSES.append(i)
     PUNCTUATION_CLASSES=set(PUNCTUATION_CLASSES)    
 
-    with open(NN_FULLFORM_LIST_PATH, "rb") as handle:
-        NN_FULLFORM_LIST = pickle.load(handle)
-
-    with open(BM_FULLFORM_LIST_PATH, "rb") as handle:
-        BM_FULLFORM_LIST = pickle.load(handle)
-
 def tag(text , write_output_to,  given_lang="au", output_tsv=False, write_identified_lang_to=None, return_as_object=False, sentences_splitted=False):
     global TOKENIZER
     global SEGMENTATION_DEVICE
     global SEGMENTATION_MODEL
     global CLASSIFICATION_MODEL
     global CLASSIFICATION_DEVICE
+    global LEMMATIZATION_MODEL
+    global LEMMATIZATION_DEVICE
     global MAX_LENGTH_WITHOUT_CLS
     global MODEL_SENTENCE_START_ID
     global MODEL_SENTENCE_END_ID
-    global NN_FULLFORM_LIST
-    global BM_FULLFORM_LIST
     global MAX_LENGTH
     global LANGUAGE_IDENTIFICATIOR_BATCH_SIZE
     global BATCH_SIZE
-    global TOKEN_MERGES
     global PUNCTUATION
     global PUNCTUATION_CLASSES
     global UKJENT_TAG_ID
@@ -363,6 +278,8 @@ def tag(text , write_output_to,  given_lang="au", output_tsv=False, write_identi
     # Just to empty anything allocated on GPU.
     torch.cuda.empty_cache()
 
+    # Preprocess input text:    
+    text=preprocess_text(text)
     if sentences_splitted:
         text=[j for j in [i.strip() for i in text] if j!=""]
         encodings = TOKENIZER(text,add_special_tokens=True, padding=False, truncation=True, max_length=MAX_LENGTH)#.to(SEGMENTATION_MODEL.device)
@@ -373,13 +290,11 @@ def tag(text , write_output_to,  given_lang="au", output_tsv=False, write_identi
             if write_identified_lang_to!=None:
                 write_identified_lang_to.write("bm")
             CLASS_TO_LABEL=CLASS_TO_LABEL_BM
-            FULLFORM_LIST=BM_FULLFORM_LIST
             MAIN_TAG_LIST=MAIN_TAG_LIST_BM
         else:
             if write_identified_lang_to!=None:
                 write_identified_lang_to.write("nn")
             CLASS_TO_LABEL=CLASS_TO_LABEL_NN
-            FULLFORM_LIST=NN_FULLFORM_LIST
             MAIN_TAG_LIST=MAIN_TAG_LIST_NN
     else:
 
@@ -459,25 +374,21 @@ def tag(text , write_output_to,  given_lang="au", output_tsv=False, write_identi
                 if write_identified_lang_to!=None:
                     write_identified_lang_to.write("nn")
                 CLASS_TO_LABEL=CLASS_TO_LABEL_NN
-                FULLFORM_LIST=NN_FULLFORM_LIST
                 MAIN_TAG_LIST=MAIN_TAG_LIST_NN
             else:
                 if write_identified_lang_to!=None:
                     write_identified_lang_to.write("bm")
                 CLASS_TO_LABEL=CLASS_TO_LABEL_BM
-                FULLFORM_LIST=BM_FULLFORM_LIST
                 MAIN_TAG_LIST=MAIN_TAG_LIST_BM
         elif given_lang=="bm":
             if write_identified_lang_to!=None:
                 write_identified_lang_to.write("bm")
             CLASS_TO_LABEL=CLASS_TO_LABEL_BM
-            FULLFORM_LIST=BM_FULLFORM_LIST
             MAIN_TAG_LIST=MAIN_TAG_LIST_BM
         else:
             if write_identified_lang_to!=None:
                 write_identified_lang_to.write("nn")
             CLASS_TO_LABEL=CLASS_TO_LABEL_NN
-            FULLFORM_LIST=NN_FULLFORM_LIST
             MAIN_TAG_LIST=MAIN_TAG_LIST_NN
 
 
@@ -562,14 +473,22 @@ def tag(text , write_output_to,  given_lang="au", output_tsv=False, write_identi
     torch.cuda.empty_cache()
 
     # Now use the classification model to tag
-    # and tokenization model to merge tokens
+    # and lemmatization model to get lemmas of words and determine word bounderies
     for my_batch in batched_sentences:
         my_batch={"input_ids":my_batch["input_ids"].to(CLASSIFICATION_MODEL.device), "attention_mask":my_batch["attention_mask"].to(CLASSIFICATION_MODEL.device)}
         outputs = CLASSIFICATION_MODEL(**my_batch)
         classification_output=outputs.logits.argmax(-1)
 
+
+        my_batch["input_ids"]=my_batch["input_ids"].to(LEMMATIZATION_MODEL.device)
+        my_batch["attention_mask"]=my_batch["attention_mask"].to(LEMMATIZATION_MODEL.device)
+        outputs = LEMMATIZATION_MODEL(**my_batch)
+        lemmatization_output=outputs.logits.argmax(-1)
+
         # Done using model on the model device. Bring tensors back to CPU
         classification_output=classification_output.to("cpu")
+        lemmatization_output=lemmatization_output.to("cpu")
+
         my_batch["input_ids"]=my_batch["input_ids"].to("cpu")
         my_batch["attention_mask"]=my_batch["attention_mask"].to("cpu")
 
@@ -577,35 +496,52 @@ def tag(text , write_output_to,  given_lang="au", output_tsv=False, write_identi
         for i in range(int(classification_output.size()[0])):
             classes = [CLASS_TO_LABEL[int(t)]  for t in classification_output[i]]
             tag = []
-            for token, token_class, token_class_num in zip(my_batch["input_ids"][i], classes, classification_output[i]):
+            last_tag=""
+            last_lemma=""
+            for token, token_class, token_class_num, lemma_id in zip(my_batch["input_ids"][i], classes, classification_output[i], lemmatization_output[i]):
                 if token==MODEL_SENTENCE_START_ID:
                     continue
                 elif token==MODEL_SENTENCE_END_ID:
                     break
-                if int(token_class_num.cpu()) in PUNCTUATION_CLASSES:
-                    tag.append({"w":TOKENIZER.decode(token).strip(), "t":token_class})
-                    continue
-                if TOKEN_MERGES[token]:
-                    tag.append({"w":TOKENIZER.decode(token)[1:], "t":token_class})
-                else:
+                lemma_id=int(lemma_id)
+                if lemma_id == 0:
                     if len(tag)>0:
                         tag[-1]["w"] += TOKENIZER.decode(token)
                     else:
-                        tag.append({"w": TOKENIZER.decode(token), "t": token_class})
+                        tag.append({"w": TOKENIZER.decode(token), "t": token_class, "l":lemma_id})
+                else:
+                    tag.append({"w":TOKENIZER.decode(token).strip(), "t":token_class, "l":lemma_id})
+                continue
+                    
+                #print(lemma_id)
+                #exit(0)
+                #if int(token_class_num.cpu()) in PUNCTUATION_CLASSES:
+                #    tag.append({"w":TOKENIZER.decode(token).strip(), "t":token_class})
+                #    continue
+                #if TOKEN_MERGES[token]:
+                #    tag.append({"w":TOKENIZER.decode(token)[1:], "t":token_class})
+                #else:
+                #    if len(tag)>0:
+                #        tag[-1]["w"] += TOKENIZER.decode(token)
+                #    else:
+                #        tag.append({"w": TOKENIZER.decode(token), "t": token_class})
+            tag=[{"w":i["w"], "t":[MAIN_TAG_LIST[j] for j in i["t"]], "l":LemmaHandling.get_lemma_given_word_and_lemma_list_index(i["w"],i["l"])} for i in tag]
 
+#            print(tag)
+#            exit(0)
             # Check if the words come after punctuations. Assign True for their places. False otherwise
-            check_for_first_word=[True]+[True if "t" in tagging and len(set(tagging["t"]).intersection(PUNCTUATION))>0 else False for tagging in tag][:-1]
+#            check_for_first_word=[True]+[True if "t" in tagging and len(set(tagging["t"]).intersection(PUNCTUATION))>0 else False for tagging in tag][:-1]
 
             # Check if the words that come after punctuations begin with an alphanumeric. True if yes, False otherwise
             # By other words, this marks the words that needs special handling
-            check_for_first_word=[ True if item[0] and item[1]["w"].isalpha() else False for item in zip(check_for_first_word, tag)]
+#            check_for_first_word=[ True if item[0] and item[1]["w"].isalpha() else False for item in zip(check_for_first_word, tag)]
 
             # Get the tags for the words. If it is a marked word, use get_lemma_for_the_first_word else use get_lemma
-            tag=[dict(item[1], **dict({"l":get_lemma(item[1]["w"], 0 , item[1]["t"] if "t" in item[1] else [UKJENT_TAG_ID] ,FULLFORM_LIST)if not item[0] else get_lemma_for_the_first_word(item[1]["w"], item[1]["t"] if "t" in item[1] else [UKJENT_TAG_ID] ,FULLFORM_LIST)  }))   for item in zip(check_for_first_word,tag) ]
+#            tag=[dict(item[1], **dict({"l":get_lemma(item[1]["w"], 0 , item[1]["t"] if "t" in item[1] else [UKJENT_TAG_ID] ,FULLFORM_LIST)if not item[0] else get_lemma_for_the_first_word(item[1]["w"], item[1]["t"] if "t" in item[1] else [UKJENT_TAG_ID] ,FULLFORM_LIST)  }))   for item in zip(check_for_first_word,tag) ]
 
             # Assign word as lemma if lemma is None.
             # Assign tag as ukjent if tag is empty set.
-            tag=[{"w":j["w"], "l": j["w"] if j["l"]==None else j["l"] , "t":[ MAIN_TAG_LIST[k] for k in j["t"]] if "t" in j else ["ukjent"] } for j in tag]
+#            tag=[{"w":j["w"], "l": j["w"] if j["l"]==None else j["l"] , "t":[ MAIN_TAG_LIST[k] for k in j["t"]] if "t" in j else ["ukjent"] } for j in tag]
 #            general_counter_all+=len(tag)
 #            print(general_counter_all)
             if output_tsv:
