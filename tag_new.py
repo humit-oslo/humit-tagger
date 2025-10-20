@@ -278,8 +278,13 @@ def tag(text , write_output_to,  given_lang="au", output_tsv=False, write_identi
     # Just to empty anything allocated on GPU.
     torch.cuda.empty_cache()
 
-    # Preprocess input text:    
-    text=preprocess_text(text)
+    all_tags_object=[]
+
+    # Preprocess input text:   
+    if type(text)==list:
+        text=[preprocess_text(i) for i in text]
+    else:
+        text=preprocess_text(text)
     if sentences_splitted:
         text=[j for j in [i.strip() for i in text] if j!=""]
         encodings = TOKENIZER(text,add_special_tokens=True, padding=False, truncation=True, max_length=MAX_LENGTH)#.to(SEGMENTATION_MODEL.device)
