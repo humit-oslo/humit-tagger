@@ -34,4 +34,4 @@ if [[ "$?" -eq 0 ]]; then
     #rm models/*/x*
 fi
 
-#pip3 install -r requirements.txt
+pip3 install -r requirements.txt
